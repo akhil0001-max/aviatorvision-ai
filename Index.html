@@ -1,0 +1,89 @@
+<!DOCTYPE html><html>
+<head>
+  <title>AviatorVision AI</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; background: #0e0e0e; color: #fff; }
+    video { width: 90%; border: 2px solid #4caf50; border-radius: 10px; margin-top: 10px; }
+    canvas { display: none; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; background: #4caf50; color: white; border: none; border-radius: 5px; }
+    #predictions { font-size: 20px; margin-top: 15px; }
+  </style>
+</head>
+<body>
+  <h1>AviatorVision AI</h1>
+  <video id="video" autoplay></video>
+  <canvas id="canvas"></canvas>
+  <div>
+    <button onclick="startReading()">Start AI Training</button>
+  </div>
+  <div id="predictions">Predictions: <span id="prediction-values">N/A</span></div>  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const predictionsEl = document.getElementById('prediction-values');
+    let multipliers = [];
+    let model;
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      return new Promise(resolve => video.onloadedmetadata = resolve);
+    }
+
+    async function readMultiplierFromFrame() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const dataURL = canvas.toDataURL('image/png');
+      const result = await Tesseract.recognize(dataURL, 'eng');
+      const text = result.data.text;
+      const match = text.match(/(\d+\.\d+)x/);
+      return match ? parseFloat(match[1]) : null;
+    }
+
+    async function startReading() {
+      await setupCamera();
+      setInterval(async () => {
+        const multiplier = await readMultiplierFromFrame();
+        if (multiplier && (multipliers.length === 0 || multipliers[multipliers.length - 1] !== multiplier)) {
+          multipliers.push(multiplier);
+          if (multipliers.length > 100) multipliers.shift();
+          trainModel();
+          const prediction = predictNextRounds();
+          predictionsEl.innerText = prediction.join(", ");
+        }
+      }, 4000); // Adjust delay to match Aviator round speed
+    }
+
+    function createModel() {
+      model = tf.sequential();
+      model.add(tf.layers.dense({ inputShape: [10], units: 32, activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 10 }));
+      model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
+    }
+
+    function trainModel() {
+      if (!model) createModel();
+      if (multipliers.length < 20) return;
+      const inputs = [];
+      const outputs = [];
+      for (let i = 0; i < multipliers.length - 10; i++) {
+        inputs.push(multipliers.slice(i, i + 10));
+        outputs.push(multipliers.slice(i + 1, i + 11));
+      }
+      const inputTensor = tf.tensor2d(inputs);
+      const outputTensor = tf.tensor2d(outputs);
+      model.fit(inputTensor, outputTensor, { epochs: 3, verbose: 0 });
+    }
+
+    function predictNextRounds() {
+      if (!model || multipliers.length < 10) return ["..."];
+      const input = tf.tensor2d([multipliers.slice(-10)]);
+      const prediction = model.predict(input).dataSync();
+      return Array.from(prediction).map(x => x.toFixed(2));
+    }
+  </script></body>
+</html>
